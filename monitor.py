@@ -323,13 +323,11 @@ def deliver(db, sender=None, now_ms=None, confirm=False):
         db.execute("UPDATE posts SET delivery='expired' WHERE delivery='pending' AND created_ms<?",
                    (now_ms - LOOKBACK_MS,))
     rows = db.execute("SELECT user_id,id,payload FROM posts WHERE delivery='pending' ORDER BY created_ms,user_id,id").fetchall()
-    confirm = confirm and get_meta(db, 'confirmation_revision') != CONFIRMATION_REVISION
-    alerts = [t['id'] for t in TARGETS
-              if source_meta(db, t['id'], 'last_error', '')
-              and int(source_meta(db, t['id'], 'fetch_failures', 0)) >= 3
-              and now_ms-int(source_meta(db,t['id'],'last_alert_ms',0)) > 6*3600_000]
-    if not rows and not confirm and not alerts:
+    # A digest must always contain at least one eligible, unsent post.
+    # Source errors and configuration changes alone must never send email.
+    if not rows:
         return 0
+    confirm = confirm and get_meta(db, 'confirmation_revision') != CONFIRMATION_REVISION
     grouped = {t['id']: [] for t in TARGETS}
     for row in rows:
         if row['user_id'] not in grouped:
@@ -358,11 +356,8 @@ def deliver(db, sender=None, now_ms=None, confirm=False):
         else:
             body += ('本轮暂无可推送记录，是否有新增尚待获取恢复。\n' if error else '本轮无新增。\n')
     subject = (f'[雪球监控已更新] 四个来源合并推送 · {len(rows)} 条新动态' if confirm else
-               f'[雪球动态汇总] 四个来源 · {len(rows)} 条新发言' if rows else
-               '[雪球监控异常] 四个来源状态汇总')
-    key = ('posts:' + ','.join(f"{r['user_id']}:{r['id']}" for r in rows) if rows else
-           f'configuration:{CONFIRMATION_REVISION}' if confirm else
-           'alerts:' + ','.join(alerts) + ':' + str(now_ms//(6*3600_000)))
+               f'[雪球动态汇总] 四个来源 · {len(rows)} 条新发言')
+    key = 'posts:' + ','.join(f"{r['user_id']}:{r['id']}" for r in rows)
     sender(subject, body, key)
     now = int(time.time() * 1000)
     with db:
@@ -370,8 +365,6 @@ def deliver(db, sender=None, now_ms=None, confirm=False):
                        [(now,r['user_id'],r['id']) for r in rows])
         put_meta(db, 'last_delivery_ms', now)
         put_meta(db, 'delivered_message_count', int(get_meta(db,'delivered_message_count',0))+1)
-        for uid in alerts:
-            put_source_meta(db,uid,'last_alert_ms',now_ms)
         if confirm:
             put_meta(db,'confirmation_revision',CONFIRMATION_REVISION)
             put_meta(db,'configuration_mail_accepted_ms',now)
@@ -474,25 +467,9 @@ def main():
                 if args.action in ('check','check-and-confirm'):
                     check(db,confirm=args.action=='check-and-confirm')
                 elif args.action == 'test-mail':
-                    if not in_active_window(int(time.time() * 1000)):
-                        raise MonitorError('test_mail_outside_active_window')
-                    if not get_meta(db, 'initialized_ms'):
-                        raise MonitorError('baseline_not_initialized')
-                    n = db.execute('SELECT COUNT(*) FROM posts').fetchone()[0]
-                    row = db.execute('SELECT payload FROM posts ORDER BY created_ms DESC LIMIT 1').fetchone()
-                    body = (f'这是一封 terryp57 雪球动态监控测试邮件。\n收件人：{RECIPIENT}\n'
-                            f'北京时间每天 06:00–23:00 每 5 分钟检查一次（23:00 最后一轮），仅发送过去 12 小时新增且未发消息。\n'
-                            f'已保留 {n} 条去重记录，不补发旧帖。\n'
-                            '采集使用公开访客会话，无需保持 Chrome 打开。\n'
-                            '范围为主页全部帖子（含转发及主页中的回复型帖子），不包含独立回复标签的所有评论。\n'
-                            f'测试时间：{stamp()}（北京时间）。\n\n以下是最近一条已有动态示例，不是新增提醒：')
-                    if row:
-                        body += render_posts([json.loads(row[0])])
-                    send_mail('[雪球监控测试] terryp57 · 每5分钟检查', body, f'test:{time.time_ns()}')
-                    with db:
-                        put_meta(db, 'test_mail_accepted_ms', int(time.time() * 1000))
-                    logging.info('test_mail_smtp_accepted')
-                    print('test_mail_smtp_accepted')
+                    # Retain the old command as a safe no-op for existing callers.
+                    logging.info('test_mail_disabled_new_posts_only')
+                    print('test_mail_disabled_new_posts_only')
                 else:
                     print(json.dumps(status(db), ensure_ascii=False, indent=2))
                 return 0

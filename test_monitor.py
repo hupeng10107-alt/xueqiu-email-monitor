@@ -202,13 +202,36 @@ class MultiSourceTests(unittest.TestCase):
         self.assertEqual(calls[0][1].count('获取状态：异常'),2)
         m.deliver(self.db,lambda *a:self.fail('duplicate alert'),now_ms=self.now+1000)
 
-    def test_configuration_confirmation_is_sent_once_with_all_four_sources(self):
+    def test_configuration_confirmation_requires_new_posts(self):
         calls=[]
+        self.assertEqual(m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now,confirm=True),0)
+        self.assertEqual(calls,[])
+        t=m.TARGETS[0]
+        m.ingest(self.db,[self.source_post(t)],self.now,t['id'],t['name'])
         m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now,confirm=True)
         m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now+1000,confirm=True)
         self.assertEqual(len(calls),1)
-        self.assertEqual(calls[0][1].count('本轮无新增'),4)
+        self.assertEqual(calls[0][1].count('本轮无新增'),3)
         self.assertEqual(m.get_meta(self.db,'confirmation_revision'),m.CONFIRMATION_REVISION)
+
+    def test_errors_and_expired_posts_never_send_empty_digest(self):
+        t=m.TARGETS[0]
+        m.ingest(self.db,[self.source_post(t)],self.now,t['id'],t['name'])
+        with self.db:
+            self.db.execute("UPDATE posts SET created_ms=? WHERE delivery='pending'",(self.now-m.LOOKBACK_MS-1,))
+            for target in m.TARGETS:
+                m.put_source_meta(self.db,target['id'],'last_error','xueqiu_http_400')
+                m.put_source_meta(self.db,target['id'],'fetch_failures',10)
+        for confirm in (False,True):
+            self.assertEqual(m.deliver(self.db,lambda *a:self.fail('empty email'),now_ms=self.now,confirm=confirm),0)
+        self.assertEqual(self.db.execute("SELECT delivery FROM posts").fetchone()[0],'expired')
+        self.assertIsNone(m.get_meta(self.db,'delivered_message_count'))
+        self.assertEqual(m.source_meta(self.db,t['id'],'last_error'),'xueqiu_http_400')
+
+    def test_legacy_test_mail_command_cannot_send_email(self):
+        with patch.object(m,'RUNTIME',Path(self.tmp.name)),patch('sys.argv',['monitor.py','test-mail']),patch.object(m,'RotatingFileHandler',return_value=m.logging.NullHandler()),patch.object(m,'send_mail') as sender:
+            self.assertEqual(m.main(),0)
+        sender.assert_not_called()
 
     def test_new_source_initialization_does_not_reset_existing_source(self):
         uid=m.TARGETS[0]['id']

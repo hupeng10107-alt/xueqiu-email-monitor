@@ -6,9 +6,9 @@ The active deployment uses a Linux server with a systemd timer; the former GitHu
 
 ## Four sources, one combined email
 
-`targets.json` tracks PaulWu (1965894836), 梁宏 (9887656769), 老鬼的逻辑 (1064583172), and terryp57 (2151206013). Each run checks all four and sends at most one email, with a section for each source. Quiet sources are explicitly marked. If all sources are quiet and no error alert is due, no email is sent. Source errors and new posts share the same email; a failed source does not block the others.
+`targets.json` tracks PaulWu (1965894836), 梁宏 (9887656769), 老鬼的逻辑 (1064583172), and terryp57 (2151206013). Each run checks all four and sends at most one email, with a section for each source. Quiet sources are explicitly marked. If there are no eligible unsent posts, no email is sent, including when sources fail or configuration changes. Source errors may appear alongside new posts in the same email; a failed source does not block the others.
 
-State migrates automatically from the original single-source database. Existing terryp57 delivery history is preserved. New sources establish their own baseline on their first successful check, without sending existing posts. Deduplication uses `(source user ID, post ID)`. `check-and-confirm` manually sends one configuration confirmation (combined with new posts if any); its revision is persisted so repeating it does not send another confirmation.
+State migrates automatically from the original single-source database. Existing terryp57 delivery history is preserved. New sources establish their own baseline on their first successful check, without sending existing posts. Deduplication uses `(source user ID, post ID)`. `check-and-confirm` includes configuration information only when there are eligible new posts; it never sends an empty confirmation. The legacy `test-mail` command is disabled and sends no email.
 
 ## Schedule and content rules
 
@@ -30,7 +30,7 @@ Secrets:
 
 Variable `MONITOR_ENABLED=true` enables scheduled runs. It stays false during migration validation. Manually dispatched `diagnose`, `bootstrap`, and `check` modes remain available.
 
-`diagnose` validates public source access and sends a labeled test email without sending newly discovered posts or publishing a state snapshot. `bootstrap` migrates the seed once, refuses to replace an existing cloud snapshot, then performs a normal check. All later runs restore the newest snapshot. Missing or corrupt cloud state stops sending instead of rebuilding an empty history.
+`diagnose` validates public source access without sending email or publishing a state snapshot. `bootstrap` migrates the seed once, refuses to replace an existing cloud snapshot, then performs a normal check. All later runs restore the newest snapshot. Missing or corrupt cloud state stops sending instead of rebuilding an empty history.
 
 Only the newest three snapshots are retained, each with a 90-day retention limit. Snapshots contain public timeline payloads, IDs, and delivery metadata, without SMTP credentials or email addresses. State is saved even if source acquisition or SMTP fails. Prolonged inactivity beyond artifact retention requires a deliberate state recovery.
 

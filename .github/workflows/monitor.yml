@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'diagnose = source + labeled email test; bootstrap = one-time migration; check = normal run'
+        description: 'diagnose = source probe only; bootstrap = one-time migration; check = normal run'
         required: true
         type: choice
         default: check
@@ -49,11 +49,10 @@ jobs:
         id: restore
         if: inputs.mode != 'diagnose' && inputs.mode != 'bootstrap'
         run: python3 state_store.py restore
-      - name: Validate cloud source and SMTP
+      - name: Validate cloud source
         if: inputs.mode == 'diagnose'
         run: |
           python3 cloud_probe.py
-          python3 monitor.py test-mail
       - name: Check rolling 12-hour timeline
         id: check
         if: inputs.mode != 'diagnose'
