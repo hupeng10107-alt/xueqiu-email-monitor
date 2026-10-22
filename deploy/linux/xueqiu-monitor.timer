@@ -1,0 +1,14 @@
+[Unit]
+Description=Check public timelines every five minutes in the Beijing daytime window
+
+[Timer]
+OnCalendar=*-*-* 06..22:00/5:00 Asia/Shanghai
+OnCalendar=*-*-* 23:00:00 Asia/Shanghai
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=xueqiu-monitor.service
+
+[Install]
+WantedBy=timers.target
+

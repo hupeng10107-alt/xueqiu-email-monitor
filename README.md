@@ -1,6 +1,8 @@
 # Public timeline email monitor
 
-A standard-library Python monitor executed on GitHub-hosted Ubuntu runners. Email addresses and SMTP credentials belong in GitHub Secrets, never in source control.
+A standard-library Python monitor for a Linux server or GitHub-hosted Ubuntu runners. Email addresses and SMTP credentials belong in private runtime configuration, never in source control.
+
+The active deployment uses a Linux server with a systemd timer; the former GitHub workflow is disabled to prevent duplicate senders. See [Linux deployment and operations](deploy/linux/README.md). The GitHub setup below is retained as an alternative and must stay disabled while the server timer is active.
 
 ## Four sources, one combined email
 
@@ -17,7 +19,7 @@ State migrates automatically from the original single-source database. Existing 
 - Scope: the profile's All timeline, including reposts and reply-style posts listed there. The separate Replies tab's complete comment history is outside scope.
 - Posts are deduplicated by source user ID and post ID in SQLite. SMTP failures leave a durable outbox. An SMTP-accepted message followed by a crash before the database commit may be retried; deterministic Message-ID helps recipient deduplication.
 
-## Repository configuration
+## Alternative GitHub deployment configuration
 
 Secrets:
 

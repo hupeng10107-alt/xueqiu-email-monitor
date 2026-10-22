@@ -1,0 +1,28 @@
+[Unit]
+Description=Incremental public timeline email monitor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=xueqiu-monitor
+Group=xueqiu-monitor
+WorkingDirectory=/opt/xueqiu-monitor
+EnvironmentFile=/etc/xueqiu-monitor.env
+Environment=MONITOR_RUNTIME=/var/lib/xueqiu-monitor
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TZ=Asia/Shanghai
+StateDirectory=xueqiu-monitor
+StateDirectoryMode=0700
+UMask=0077
+ExecStartPre=/usr/bin/python3.11 /opt/xueqiu-monitor/deploy/linux/validate_state.py /var/lib/xueqiu-monitor/state.sqlite3
+ExecStart=/usr/bin/python3.11 /opt/xueqiu-monitor/monitor.py check
+TimeoutStartSec=240
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+
