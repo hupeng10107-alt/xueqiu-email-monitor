@@ -15,7 +15,7 @@ State migrates automatically from the original single-source database. Existing 
 - GitHub scheduled jobs can be delayed or dropped. The program checks actual wall-clock time again: no source request or alert outside the window, including delayed jobs after 23:00's minute.
 - Inspect a rolling twelve-hour timeline; send only unseen posts published after the original monitor activation and within those twelve hours. Retried messages expire too.
 - Scope: the profile's All timeline, including reposts and reply-style posts listed there. The separate Replies tab's complete comment history is outside scope.
-- Posts are deduplicated by ID in SQLite. SMTP failures leave a durable outbox. An SMTP-accepted message followed by a crash before the database commit may be retried; deterministic Message-ID helps recipient deduplication.
+- Posts are deduplicated by source user ID and post ID in SQLite. SMTP failures leave a durable outbox. An SMTP-accepted message followed by a crash before the database commit may be retried; deterministic Message-ID helps recipient deduplication.
 
 ## Repository configuration
 
