@@ -1,0 +1,36 @@
+# Public timeline email monitor
+
+A standard-library Python monitor executed on GitHub-hosted Ubuntu runners. Email addresses and SMTP credentials belong in GitHub Secrets, never in source control.
+
+## Schedule and content rules
+
+- Timezone: Asia/Shanghai (UTC+8, no daylight saving).
+- Every five minutes from 06:00 through 22:55, plus one final 23:00 check.
+- GitHub scheduled jobs can be delayed or dropped. The program checks actual wall-clock time again: no source request or alert outside the window, including delayed jobs after 23:00's minute.
+- Inspect a rolling twelve-hour timeline; send only unseen posts published after the original monitor activation and within those twelve hours. Retried messages expire too.
+- Scope: the profile's All timeline, including reposts and reply-style posts listed there. The separate Replies tab's complete comment history is outside scope.
+- Posts are deduplicated by ID in SQLite. SMTP failures leave a durable outbox. An SMTP-accepted message followed by a crash before the database commit may be retried; deterministic Message-ID helps recipient deduplication.
+
+## Repository configuration
+
+Secrets:
+
+- `MONITOR_RECIPIENT`: destination email.
+- `SMTP_USERNAME`: existing 126.com SMTP account.
+- `SMTP_PASSWORD`: existing SMTP authorization code.
+- `MONITOR_SEED_STATE_GZ`: base64-encoded gzip SQLite backup for one-time migration.
+
+Variable `MONITOR_ENABLED=true` enables scheduled runs. It stays false during migration validation. Manually dispatched `diagnose`, `bootstrap`, and `check` modes remain available.
+
+`diagnose` validates public source access and sends a labeled test email without sending newly discovered posts or publishing a state snapshot. `bootstrap` migrates the seed once, refuses to replace an existing cloud snapshot, then performs a normal check. All later runs restore the newest snapshot. Missing or corrupt cloud state stops sending instead of rebuilding an empty history.
+
+Only the newest three snapshots are retained, each with a 90-day retention limit. Snapshots contain public timeline payloads, IDs, and delivery metadata, without SMTP credentials or email addresses. State is saved even if source acquisition or SMTP fails. Prolonged inactivity beyond artifact retention requires a deliberate state recovery.
+
+Every thirty days, the workflow updates only `ops/heartbeat.json`, avoiding GitHub's automatic schedule disablement after sixty days without repository activity. The workflow does not run on pushes or pull requests. Official actions are pinned by commit SHA. Its token is scoped to this repository.
+
+## References
+
+- [GitHub scheduled workflow behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+- [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+
+Standard GitHub-hosted runners in public repositories are free; do not switch this repository to private or use larger runners without reviewing billing. Automatic cleanup keeps state storage small.

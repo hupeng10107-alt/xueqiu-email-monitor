@@ -1,0 +1,8 @@
+runtime/
+artifact/
+__pycache__/
+*.pyc
+*.env
+*.sqlite3
+*.zip
+.DS_Store
