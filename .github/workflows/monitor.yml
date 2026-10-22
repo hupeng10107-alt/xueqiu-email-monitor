@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         default: check
-        options: [check, diagnose, bootstrap]
+        options: [check, check-and-confirm, diagnose, bootstrap]
   schedule:
     # UTC 22:00..23:55 and 00:00..14:55 = Beijing 06:00..22:55.
     - cron: '*/5 0-14,22-23 * * *'
@@ -57,7 +57,9 @@ jobs:
       - name: Check rolling 12-hour timeline
         id: check
         if: inputs.mode != 'diagnose'
-        run: python3 monitor.py check
+        env:
+          MONITOR_ACTION: ${{ inputs.mode == 'check-and-confirm' && 'check-and-confirm' || 'check' }}
+        run: python3 monitor.py "$MONITOR_ACTION"
       - name: Prepare state even after source or delivery failure
         id: prepare
         if: always() && inputs.mode != 'diagnose' && (steps.seed.outcome == 'success' || steps.restore.outcome == 'success')
@@ -87,8 +89,8 @@ jobs:
           p = pathlib.Path('runtime/status.json')
           if p.exists():
               d = json.loads(p.read_text())
-              safe = {k:d[k] for k in ['interval_seconds','timezone','active_window','lookback_hours','counts','reported_at']}
-              safe['health'] = {k:d['meta'].get(k,'') for k in ['last_fetch_ms','last_error','delivery_error','fetch_failures']}
+              safe = {k:d[k] for k in ['interval_seconds','timezone','active_window','lookback_hours','source_count','mail_mode','sources','counts','reported_at']}
+              safe['health'] = {k:d['meta'].get(k,'') for k in ['last_fetch_ms','last_error','delivery_error','fetch_failures','configuration_mail_accepted_ms','delivered_message_count']}
               print(json.dumps(safe, ensure_ascii=False))
               with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
                   f.write('```json\n'+json.dumps(safe,ensure_ascii=False,indent=2)+'\n```\n')

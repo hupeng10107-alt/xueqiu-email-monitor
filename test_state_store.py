@@ -52,6 +52,7 @@ class StateTests(unittest.TestCase):
             store.restore(seed=True)
         with sqlite3.connect(self.database) as db:
             self.assertEqual(db.execute("SELECT value FROM meta WHERE key='initialized_ms'").fetchone()[0], '123456')
+        db.close()
 
     def test_artifact_with_unexpected_paths_is_rejected(self):
         data = io.BytesIO()

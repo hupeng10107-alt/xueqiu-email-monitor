@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -109,7 +110,7 @@ class MonitorTests(unittest.TestCase):
         called = []
         self.assertEqual(m.deliver(self.db, lambda *a: called.append(a), now_ms=now), 2)
         self.assertEqual(self.db.execute("SELECT delivery FROM posts WHERE id='1'").fetchone()[0], 'expired')
-        self.assertIn('posts:2,3', called[0][2])
+        self.assertIn(f'posts:{m.USER_ID}:2,{m.USER_ID}:3', called[0][2])
 
     def test_unseen_recent_post_older_than_watermark_is_not_lost(self):
         m.ingest(self.db, [post(1, 1000)], 2000)
@@ -123,6 +124,118 @@ class MonitorTests(unittest.TestCase):
             {'id':2,'created_at':cutoff+1000,'user_id':m.USER_ID,'mark':1,'text':'新置顶'},
             {'id':1,'created_at':cutoff-1000,'user_id':m.USER_ID,'mark':0,'text':'旧帖'}]}
         self.assertEqual([p['id'] for p in client.fetch(cutoff)], ['1','2'])
+
+
+class MultiSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = m.init_db(Path(self.tmp.name)/'state.sqlite3')
+        self.now = int(m.datetime.fromisoformat('2026-10-22T18:00:00+08:00').timestamp()*1000)
+        for t in m.TARGETS:
+            m.ingest(self.db,[],self.now-600_000,t['id'],t['name'])
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def source_post(self,t,sid=2):
+        return dict(post(sid,self.now-1000),user_id=t['id'],screen_name=t['name'],
+                    url=f"https://xueqiu.com/{t['id']}/{sid}")
+
+    def test_four_sources_same_id_one_email_four_groups(self):
+        for t in m.TARGETS:
+            m.ingest(self.db,[self.source_post(t)],self.now,t['id'],t['name'])
+        calls=[]
+        self.assertEqual(m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now),4)
+        self.assertEqual(len(calls),1)
+        for t in m.TARGETS:
+            self.assertIn(t['name']+'（'+t['id']+'）',calls[0][1])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM posts WHERE delivery='sent'").fetchone()[0],4)
+        self.assertEqual(m.deliver(self.db,lambda *a:self.fail('duplicate'),now_ms=self.now),0)
+
+    def test_quiet_sources_are_present_in_single_updated_digest(self):
+        t=m.TARGETS[0]
+        m.ingest(self.db,[self.source_post(t)],self.now,t['id'],t['name'])
+        calls=[]
+        m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(calls[0][1].count('本轮无新增'),3)
+
+    def test_multi_source_mail_failure_preserves_every_pending_record(self):
+        for t in m.TARGETS:
+            m.ingest(self.db,[self.source_post(t)],self.now,t['id'],t['name'])
+        def fail(*a): raise m.MonitorError('smtp_network_or_protocol_error')
+        with self.assertRaises(m.MonitorError):
+            m.deliver(self.db,fail,now_ms=self.now)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM posts WHERE delivery='pending'").fetchone()[0],4)
+        calls=[]
+        m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now+1000)
+        self.assertEqual(len(calls),1)
+
+    def test_failed_source_does_not_stop_other_sources_or_add_an_email(self):
+        failed=m.TARGETS[1]['id']
+        outer=self
+        class Source:
+            def __init__(self,uid,name): self.uid=uid
+            def fetch(self,cutoff):
+                if self.uid==failed: raise m.MonitorError('xueqiu_http_400')
+                t=next(t for t in m.TARGETS if t['id']==self.uid)
+                return [outer.source_post(t)]
+        calls=[]
+        with self.assertLogs(level='ERROR'),patch.object(m.time,'time',return_value=self.now/1000),patch.object(m,'Xueqiu',Source),patch.object(m,'send_mail',side_effect=lambda *a:calls.append(a)):
+            with self.assertRaises(m.MonitorError): m.check(self.db)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM posts WHERE delivery='sent'").fetchone()[0],3)
+        self.assertIn('获取状态：异常',calls[0][1])
+        self.assertEqual(m.source_meta(self.db,failed,'fetch_failures'),'1')
+
+    def test_multiple_alerts_and_updates_share_one_email(self):
+        with self.db:
+            for t in m.TARGETS[:2]:
+                m.put_source_meta(self.db,t['id'],'last_error','xueqiu_http_400')
+                m.put_source_meta(self.db,t['id'],'fetch_failures',3)
+        t=m.TARGETS[3]
+        m.ingest(self.db,[self.source_post(t)],self.now,t['id'],t['name'])
+        calls=[]
+        m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(calls[0][1].count('获取状态：异常'),2)
+        m.deliver(self.db,lambda *a:self.fail('duplicate alert'),now_ms=self.now+1000)
+
+    def test_configuration_confirmation_is_sent_once_with_all_four_sources(self):
+        calls=[]
+        m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now,confirm=True)
+        m.deliver(self.db,lambda *a:calls.append(a),now_ms=self.now+1000,confirm=True)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(calls[0][1].count('本轮无新增'),4)
+        self.assertEqual(m.get_meta(self.db,'confirmation_revision'),m.CONFIRMATION_REVISION)
+
+    def test_new_source_initialization_does_not_reset_existing_source(self):
+        uid=m.TARGETS[0]['id']
+        with self.db:
+            self.db.execute('DELETE FROM meta WHERE key LIKE ?',('source:'+uid+':%',))
+        existing=m.source_meta(self.db,m.USER_ID,'initialized_ms')
+        self.assertTrue(m.ingest(self.db,[self.source_post(m.TARGETS[0])],self.now,uid)['baseline'])
+        self.assertEqual(m.source_meta(self.db,m.USER_ID,'initialized_ms'),existing)
+        self.assertEqual(m.deliver(self.db,lambda *a:self.fail('old post'),now_ms=self.now),0)
+
+    def test_legacy_state_migration_preserves_sent_posts_and_activation(self):
+        path=Path(self.tmp.name)/'legacy.sqlite3'
+        with sqlite3.connect(path) as db:
+            db.executescript('''CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+              CREATE TABLE posts(id TEXT PRIMARY KEY,created_ms INTEGER NOT NULL,payload TEXT NOT NULL,
+              delivery TEXT NOT NULL,discovered_ms INTEGER NOT NULL,sent_ms INTEGER);''')
+            db.execute('INSERT INTO meta VALUES (?,?)',('initialized_ms',str(self.now-600_000)))
+            db.execute('INSERT INTO posts VALUES (?,?,?,?,?,?)',('2',self.now-1000,json.dumps(post(2,self.now-1000)),'sent',self.now-1000,self.now-500))
+        db.close()
+        migrated=m.init_db(path)
+        try:
+            self.assertEqual(m.source_meta(migrated,m.USER_ID,'initialized_ms'),str(self.now-600_000))
+            self.assertEqual(migrated.execute('SELECT user_id,delivery FROM posts').fetchone()[:],(m.USER_ID,'sent'))
+            self.assertEqual(m.ingest(migrated,[post(2,self.now-1000)],self.now)['new'],0)
+            self.assertEqual(m.deliver(migrated,lambda *a:self.fail('legacy duplicate'),now_ms=self.now),0)
+            self.assertEqual(migrated.execute('PRAGMA integrity_check').fetchone()[0],'ok')
+        finally: migrated.close()
 
 
 if __name__ == '__main__':

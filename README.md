@@ -2,6 +2,12 @@
 
 A standard-library Python monitor executed on GitHub-hosted Ubuntu runners. Email addresses and SMTP credentials belong in GitHub Secrets, never in source control.
 
+## Four sources, one combined email
+
+`targets.json` tracks PaulWu (1965894836), 梁宏 (9887656769), 老鬼的逻辑 (1064583172), and terryp57 (2151206013). Each run checks all four and sends at most one email, with a section for each source. Quiet sources are explicitly marked. If all sources are quiet and no error alert is due, no email is sent. Source errors and new posts share the same email; a failed source does not block the others.
+
+State migrates automatically from the original single-source database. Existing terryp57 delivery history is preserved. New sources establish their own baseline on their first successful check, without sending existing posts. Deduplication uses `(source user ID, post ID)`. `check-and-confirm` manually sends one configuration confirmation (combined with new posts if any); its revision is persisted so repeating it does not send another confirmation.
+
 ## Schedule and content rules
 
 - Timezone: Asia/Shanghai (UTC+8, no daylight saving).
