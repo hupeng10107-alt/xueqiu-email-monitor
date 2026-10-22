@@ -116,6 +116,14 @@ class MonitorTests(unittest.TestCase):
         m.ingest(self.db, [post(3, 4000)], 5000)
         self.assertEqual(m.ingest(self.db, [post(2, 3000)], 6000)['new'], 1)
 
+    def test_newly_pinned_post_is_included(self):
+        cutoff = 1700000000000
+        client = object.__new__(m.Xueqiu)
+        client.read = lambda url: {'page':1, 'maxPage':1, 'statuses':[
+            {'id':2,'created_at':cutoff+1000,'user_id':m.USER_ID,'mark':1,'text':'新置顶'},
+            {'id':1,'created_at':cutoff-1000,'user_id':m.USER_ID,'mark':0,'text':'旧帖'}]}
+        self.assertEqual([p['id'] for p in client.fetch(cutoff)], ['1','2'])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -166,10 +166,15 @@ class Xueqiu:
             data = self.read('https://www.xueqiu.com/v4/statuses/user_timeline.json?' + params)
             if int(data.get('page', page)) != page:
                 raise MonitorError('unexpected_page')
-            raw = [s for s in data['statuses'] if s.get('mark') != 1]
-            posts = [normalize(s) for s in raw]
-            for p in posts:
-                result[p['id']] = p
+            posts = []
+            for raw in data['statuses']:
+                p = normalize(raw)
+                pinned = raw.get('mark') == 1
+                if not pinned:
+                    posts.append(p)
+                # New pinned posts must be sent too; old pins cannot end catch-up early.
+                if not pinned or watermark is None or p['created_ms'] >= watermark:
+                    result[p['id']] = p
             if page == 1 and not posts:
                 # Empty/hidden feeds must never silently replace a working baseline.
                 raise MonitorError('empty_timeline')
