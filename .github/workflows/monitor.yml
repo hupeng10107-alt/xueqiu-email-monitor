@@ -11,9 +11,9 @@ on:
         options: [check, check-and-confirm, diagnose, bootstrap]
   schedule:
     # UTC 22:00..23:55 and 00:00..14:55 = Beijing 06:00..22:55.
-    - cron: '*/5 0-14,22-23 * * *'
+    - cron: '0,5,10,15,20,25,30,35,40,45,50,55 0-14,22-23 * * *'
     # Final Beijing 23:00 check.
-    - cron: '0 15 * * *'
+    - cron: '00 15 * * *'
 
 permissions: {}
 concurrency:
